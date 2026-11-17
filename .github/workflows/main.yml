@@ -1,4 +1,3 @@
-
 name: Build Mahfazati APK
 
 on:
@@ -27,63 +26,46 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Extract Project Files Automatically
-        run: |
-          mkdir -p build_src
-
-          find . -type f -iname "*.zip" \
-            -not -path "./.git/*" \
-            -print0 | while IFS= read -r -d '' file; do
-              echo "Extracting: $file"
-              unzip -q -o "$file" -d build_src
-            done
-
-      - name: Detect Android Project
-        id: project
-        run: |
-          PROJECT_DIR=""
-
-          if [ -f "build_src/gradlew" ] || \
-             [ -f "build_src/build.gradle" ] || \
-             [ -f "build_src/build.gradle.kts" ]; then
-            PROJECT_DIR="build_src"
-          else
-            PROJECT_DIR=$(find build_src -type f \
-              \( -name "gradlew" -o \
-                 -name "build.gradle" -o \
-                 -name "build.gradle.kts" \) \
-              -printf '%h\n' | head -n 1)
-
-            if [ -z "$PROJECT_DIR" ]; then
-              echo "ERROR: Android Gradle project not found!"
-              find build_src -maxdepth 4 -type f
-              exit 1
-            fi
-          fi
-
-          echo "Detected project: $PROJECT_DIR"
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Gradle
+      - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
+          gradle-version: '8.9'
 
-      - name: Build Debug APK
-        working-directory: ${{ steps.project.outputs.project_dir }}
+      - name: Extract Mahfazati Project
         run: |
-          if [ -f "gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --no-daemon
-          else
-            gradle assembleDebug --no-daemon
+          test -f Mahfazati.zip || {
+            echo "ERROR: Mahfazati.zip was not found in the repository root."
+            exit 1
+          }
+
+          mkdir -p build_src
+          unzip -q -o Mahfazati.zip -d build_src
+
+          if [ ! -f build_src/settings.gradle.kts ] || [ ! -f build_src/app/build.gradle.kts ]; then
+            echo "ERROR: Expected Android project files were not found after extraction."
+            find build_src -maxdepth 4 -type f | sort
+            exit 1
           fi
 
-      - name: Upload APK
+          echo "Mahfazati project extracted successfully."
+
+      - name: Build Debug APK
+        working-directory: build_src
+        run: gradle assembleDebug --no-daemon
+
+      - name: Verify APK
+        run: |
+          APK_PATH="build_src/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+          ls -lh "$APK_PATH"
+
+      - name: Upload Mahfazati APK
         uses: actions/upload-artifact@v4
         with:
           name: Mahfazati-APK
-          path: |
-            ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/*.apk
+          path: build_src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
