@@ -1,10 +1,9 @@
 name: Build Mahfazati APK
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -14,58 +13,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - name: Extract Project ZIP
+        run: |
+          mkdir source
+          unzip -q Mahfazati.zip -d source
+          test -f source/settings.gradle.kts
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Extract Mahfazati Project
+      - uses: android-actions/setup-android@v3
+
+      - name: Install SDK
         run: |
-          test -f Mahfazati.zip || {
-            echo "ERROR: Mahfazati.zip was not found in the repository root."
-            exit 1
-          }
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-          mkdir -p build_src
-          unzip -q -o Mahfazati.zip -d build_src
+      - name: Build APK
+        working-directory: source
+        run: gradle assembleDebug --stacktrace
 
-          if [ ! -f build_src/settings.gradle.kts ] || [ ! -f build_src/app/build.gradle.kts ]; then
-            echo "ERROR: Expected Android project files were not found after extraction."
-            find build_src -maxdepth 4 -type f | sort
-            exit 1
-          fi
-
-          echo "Mahfazati project extracted successfully."
-
-      - name: Build Debug APK
-        working-directory: build_src
-        run: gradle assembleDebug --no-daemon
-
-      - name: Verify APK
-        run: |
-          APK_PATH="build_src/app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-          ls -lh "$APK_PATH"
-
-      - name: Upload Mahfazati APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mahfazati-APK
-          path: build_src/app/build/outputs/apk/debug/app-debug.apk
+          path: source/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 30
