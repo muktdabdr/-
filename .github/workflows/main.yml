@@ -3,7 +3,8 @@ name: Build Mahfazati APK
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -24,32 +25,58 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Locate Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "Found SDK Manager: $SDKMANAGER"
+
+      - name: Accept SDK Licenses
+        run: |
+          yes | "$SDKMANAGER" --licenses || true
 
       - name: Install SDK Packages
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Verify ZIP
         run: |
-          test -f Mahfazati.zip
+          if [ ! -f Mahfazati.zip ]; then
+            echo "Mahfazati.zip not found"
+            exit 1
+          fi
 
       - name: Extract Project
         run: |
           mkdir -p build_src
           unzip -q -o Mahfazati.zip -d build_src
 
-          test -f build_src/settings.gradle.kts
-          test -f build_src/app/build.gradle.kts
+          if [ ! -f build_src/settings.gradle.kts ]; then
+            echo "settings.gradle.kts not found"
+            find build_src -maxdepth 4 -type f
+            exit 1
+          fi
+
+          if [ ! -f build_src/app/build.gradle.kts ]; then
+            echo "app/build.gradle.kts not found"
+            exit 1
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
+      - name: Build Mahfazati APK
         working-directory: build_src
         run: |
           gradle assembleDebug --no-daemon --stacktrace
@@ -57,10 +84,15 @@ jobs:
       - name: Verify APK
         run: |
           APK="build_src/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
+
+          if [ ! -f "$APK" ]; then
+            echo "APK was not generated"
+            exit 1
+          fi
+
           ls -lh "$APK"
 
-      - name: Upload Mahfazati APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mahfazati-APK
