@@ -1,5 +1,5 @@
 
-name: Build Mahfazati APK
+name: Build Mahfazati Release
 
 on:
   push:
@@ -12,8 +12,13 @@ permissions:
 
 jobs:
   build:
-    name: Build Mahfazati
+    name: Build Mahfazati APK and AAB
     runs-on: ubuntu-latest
+
+    env:
+      MAHFAZATI_STORE_PASSWORD: ${{ secrets.MAHFAZATI_STORE_PASSWORD }}
+      MAHFAZATI_KEY_ALIAS: ${{ secrets.MAHFAZATI_KEY_ALIAS }}
+      MAHFAZATI_KEY_PASSWORD: ${{ secrets.MAHFAZATI_KEY_PASSWORD }}
 
     steps:
       - name: Checkout Repository
@@ -28,7 +33,6 @@ jobs:
       - name: Locate Android SDK
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
-
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager | head -n 1)
 
@@ -38,64 +42,70 @@ jobs:
           fi
 
           echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
-          echo "Found SDK Manager: $SDKMANAGER"
 
       - name: Accept SDK Licenses
-        run: |
-          yes | "$SDKMANAGER" --licenses || true
+        run: yes | "$SDKMANAGER" --licenses || true
 
-      - name: Install SDK Packages
+      - name: Install Android SDK 36
         run: |
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Verify ZIP
-        run: |
-          if [ ! -f Mahfazati.zip ]; then
-            echo "Mahfazati.zip not found"
-            exit 1
-          fi
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       - name: Extract Project
         run: |
+          test -f Mahfazati.zip
           mkdir -p build_src
           unzip -q -o Mahfazati.zip -d build_src
+          test -f build_src/settings.gradle.kts
+          test -f build_src/app/build.gradle.kts
 
-          if [ ! -f build_src/settings.gradle.kts ]; then
-            echo "settings.gradle.kts not found"
-            find build_src -maxdepth 4 -type f
+      - name: Prepare Release Signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MAHFAZATI_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || \
+             [ -z "$MAHFAZATI_STORE_PASSWORD" ] || \
+             [ -z "$MAHFAZATI_KEY_ALIAS" ] || \
+             [ -z "$MAHFAZATI_KEY_PASSWORD" ]; then
+            echo "ERROR: Release signing secrets are missing."
             exit 1
           fi
 
-          if [ ! -f build_src/app/build.gradle.kts ]; then
-            echo "app/build.gradle.kts not found"
-            exit 1
-          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > build_src/app/upload-keystore.jks
+
+          test -s build_src/app/upload-keystore.jks
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
-      - name: Build Mahfazati APK
+      - name: Build Release APK and AAB
         working-directory: build_src
         run: |
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleRelease bundleRelease \
+            --no-daemon \
+            --stacktrace
 
-      - name: Verify APK
+      - name: Verify Release Files
         run: |
-          APK="build_src/app/build/outputs/apk/debug/app-debug.apk"
+          APK="build_src/app/build/outputs/apk/release/app-release.apk"
+          AAB="build_src/app/build/outputs/bundle/release/app-release.aab"
 
-          if [ ! -f "$APK" ]; then
-            echo "APK was not generated"
-            exit 1
-          fi
+          test -f "$APK"
+          test -f "$AAB"
 
-          ls -lh "$APK"
+          ls -lh "$APK" "$AAB"
 
-      - name: Upload APK
+      - name: Upload Release APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Mahfazati-APK
-          path: build_src/app/build/outputs/apk/debug/app-debug.apk
+          name: Mahfazati-1.2.0-Release
+          path: |
+            build_src/app/build/outputs/apk/release/app-release.apk
+            build_src/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 30
